@@ -4,6 +4,17 @@ import streamlit as st
 
 DATA_FILE = "quizzes.json"
 
+# --- ADMIN CREDENTIALS ---
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "password123"
+
+# --- DEMO STUDENT CREDENTIALS ---
+# (Key: Username, Value: Password)
+STUDENT_USERS = {
+    "student1": "pass123",
+    "student2": "pass123",
+}
+
 
 # --- DATA MODELS ---
 class Question:
@@ -59,7 +70,6 @@ def load_data():
         except json.JSONDecodeError:
             quizzes = {}
 
-    # Seed default Data Analysis quiz if empty
     if not quizzes:
         da_quiz = Quiz("Data Analysis Basics")
         questions_data = [
@@ -103,131 +113,196 @@ def save_data(quizzes):
         json.dump(data, f, indent=4)
 
 
+# --- INITIALIZE SESSION STATE ---
+if "admin_logged_in" not in st.session_state:
+    st.session_state.admin_logged_in = False
+
+if "student_logged_in" not in st.session_state:
+    st.session_state.student_logged_in = False
+    st.session_state.student_user = ""
+
+
 # --- STREAMLIT UI APP ---
-st.set_page_config(
-    page_title="Quiz Dashboard", page_icon="📝", layout="wide"
-)
+st.set_page_config(page_title="Quiz Dashboard", page_icon="📝", layout="wide")
 
 quizzes = load_data()
 
 st.sidebar.title("📌 Navigation")
-app_mode = st.sidebar.radio(
-    "Select Portal", ["Student Portal", "Admin Portal"]
-)
+app_mode = st.sidebar.radio("Select Portal", ["Student Portal", "Admin Portal"])
+
+# Sidebar Logout Actions
+if app_mode == "Admin Portal" and st.session_state.admin_logged_in:
+    st.sidebar.divider()
+    if st.sidebar.button("Log Out Admin"):
+        st.session_state.admin_logged_in = False
+        st.rerun()
+
+elif app_mode == "Student Portal" and st.session_state.student_logged_in:
+    st.sidebar.divider()
+    st.sidebar.write(f"Logged in as: **{st.session_state.student_user}**")
+    if st.sidebar.button("Log Out Student"):
+        st.session_state.student_logged_in = False
+        st.session_state.student_user = ""
+        st.rerun()
+
 
 # --- STUDENT PORTAL ---
 if app_mode == "Student Portal":
     st.header("🎓 Student Portal")
 
-    if not quizzes:
-        st.info("No quizzes available. Ask an administrator to create one!")
-    else:
-        quiz_titles = list(quizzes.keys())
-        selected_quiz_title = st.selectbox("Select a Quiz to Take:", quiz_titles)
+    # STUDENT LOGIN SCREEN
+    if not st.session_state.student_logged_in:
+        st.subheader("🔑 Student Login")
+        with st.form("student_login_form"):
+            stu_username = st.text_input("Username")
+            stu_password = st.text_input("Password", type="password")
+            stu_login_btn = st.form_submit_button("Login")
 
-        quiz = quizzes[selected_quiz_title]
-
-        if not quiz.questions:
-            st.warning("This quiz has no questions yet.")
-        else:
-            st.subheader(f"Quiz: {quiz.title}")
-            st.divider()
-
-            with st.form(key="take_quiz_form"):
-                user_answers = {}
-                for idx, q in enumerate(quiz.questions):
-                    st.write(f"**Question {idx + 1}:** {q.prompt}")
-                    choice = st.radio(
-                        "Select your answer:",
-                        q.options,
-                        key=f"q_{idx}",
-                        index=None,
-                    )
-                    user_answers[idx] = choice
-                    st.divider()
-
-                submit_button = st.form_submit_button(
-                    label="Submit Quiz", type="primary"
-                )
-
-            if submit_button:
-                if any(ans is None for ans in user_answers.values()):
-                    st.error(
-                        "Please answer all questions before submitting!"
-                    )
+            if stu_login_btn:
+                if (
+                    stu_username in STUDENT_USERS
+                    and STUDENT_USERS[stu_username] == stu_password
+                ):
+                    st.session_state.student_logged_in = True
+                    st.session_state.student_user = stu_username
+                    st.success(f"Welcome, {stu_username}!")
+                    st.rerun()
                 else:
-                    score = 0
+                    st.error("Invalid student username or password.")
+
+    # STUDENT DASHBOARD (LOGGED IN)
+    else:
+        if not quizzes:
+            st.info("No quizzes available. Ask an administrator to create one!")
+        else:
+            quiz_titles = list(quizzes.keys())
+            selected_quiz_title = st.selectbox(
+                "Select a Quiz to Take:", quiz_titles
+            )
+
+            quiz = quizzes[selected_quiz_title]
+
+            if not quiz.questions:
+                st.warning("This quiz has no questions yet.")
+            else:
+                st.subheader(f"Quiz: {quiz.title}")
+                st.divider()
+
+                with st.form(key="take_quiz_form"):
+                    user_answers = {}
                     for idx, q in enumerate(quiz.questions):
-                        selected_option_idx = (
-                            q.options.index(user_answers[idx]) + 1
+                        st.write(f"**Question {idx + 1}:** {q.prompt}")
+                        choice = st.radio(
+                            "Select your answer:",
+                            q.options,
+                            key=f"q_{idx}",
+                            index=None,
                         )
-                        if selected_option_idx == q.correct_option:
-                            score += 1
+                        user_answers[idx] = choice
+                        st.divider()
 
-                    total = len(quiz.questions)
-                    percentage = (score / total) * 100
-
-                    st.balloons()
-                    st.success(
-                        f"**Quiz Finished!** Your Score: **{score}/{total}** ({percentage:.1f}%)"
+                    submit_button = st.form_submit_button(
+                        label="Submit Quiz", type="primary"
                     )
+
+                if submit_button:
+                    if any(ans is None for ans in user_answers.values()):
+                        st.error(
+                            "Please answer all questions before submitting!"
+                        )
+                    else:
+                        score = 0
+                        for idx, q in enumerate(quiz.questions):
+                            selected_option_idx = (
+                                q.options.index(user_answers[idx]) + 1
+                            )
+                            if selected_option_idx == q.correct_option:
+                                score += 1
+
+                        total = len(quiz.questions)
+                        percentage = (score / total) * 100
+
+                        st.balloons()
+                        st.success(
+                            f"**Quiz Finished!** {st.session_state.student_user}, your score is **{score}/{total}** ({percentage:.1f}%)"
+                        )
+
 
 # --- ADMIN PORTAL ---
 elif app_mode == "Admin Portal":
     st.header("⚙️ Admin Portal")
 
-    tab1, tab2 = st.tabs(["Create Quiz", "Add Question"])
+    # ADMIN LOGIN SCREEN
+    if not st.session_state.admin_logged_in:
+        st.subheader("🔒 Admin Login")
+        with st.form("admin_login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            login_btn = st.form_submit_button("Login")
 
-    # Tab 1: Create Quiz
-    with tab1:
-        st.subheader("Create a New Quiz")
-        new_quiz_title = st.text_input("Enter Quiz Title:")
-        if st.button("Create Quiz"):
-            if not new_quiz_title.strip():
-                st.error("Quiz title cannot be empty.")
-            elif new_quiz_title in quizzes:
-                st.warning("A quiz with this title already exists.")
-            else:
-                quizzes[new_quiz_title] = Quiz(new_quiz_title)
-                save_data(quizzes)
-                st.success(f"Quiz '{new_quiz_title}' created successfully!")
-                st.rerun()
-
-    # Tab 2: Add Question
-    with tab2:
-        st.subheader("Add Question to Existing Quiz")
-        if not quizzes:
-            st.info("No quizzes available. Create one first!")
-        else:
-            selected_quiz = st.selectbox("Select Quiz:", list(quizzes.keys()))
-            prompt = st.text_input("Enter Question Prompt:")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                opt1 = st.text_input("Option 1:")
-                opt2 = st.text_input("Option 2:")
-            with col2:
-                opt3 = st.text_input("Option 3:")
-                opt4 = st.text_input("Option 4:")
-
-            correct = st.selectbox(
-                "Select Correct Option:",
-                [1, 2, 3, 4],
-                format_func=lambda x: f"Option {x}",
-            )
-
-            if st.button("Add Question"):
-                options = [
-                    opt1.strip(),
-                    opt2.strip(),
-                    opt3.strip(),
-                    opt4.strip(),
-                ]
-                if not prompt.strip() or any(not o for o in options):
-                    st.error("Please fill in all options and the prompt.")
-                else:
-                    q = Question(prompt, options, correct)
-                    quizzes[selected_quiz].add_question(q)
-                    save_data(quizzes)
-                    st.success("Question added successfully!")
+            if login_btn:
+                if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+                    st.session_state.admin_logged_in = True
+                    st.success("Logged in successfully!")
                     st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+    else:
+        # LOGGED-IN ADMIN CONTROLS
+        tab1, tab2 = st.tabs(["Create Quiz", "Add Question"])
+
+        # Tab 1: Create Quiz
+        with tab1:
+            st.subheader("Create a New Quiz")
+            new_quiz_title = st.text_input("Enter Quiz Title:")
+            if st.button("Create Quiz"):
+                if not new_quiz_title.strip():
+                    st.error("Quiz title cannot be empty.")
+                elif new_quiz_title in quizzes:
+                    st.warning("A quiz with this title already exists.")
+                else:
+                    quizzes[new_quiz_title] = Quiz(new_quiz_title)
+                    save_data(quizzes)
+                    st.success(f"Quiz '{new_quiz_title}' created successfully!")
+                    st.rerun()
+
+        # Tab 2: Add Question
+        with tab2:
+            st.subheader("Add Question to Existing Quiz")
+            if not quizzes:
+                st.info("No quizzes available. Create one first!")
+            else:
+                selected_quiz = st.selectbox(
+                    "Select Quiz:", list(quizzes.keys())
+                )
+                prompt = st.text_input("Enter Question Prompt:")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    opt1 = st.text_input("Option 1:")
+                    opt2 = st.text_input("Option 2:")
+                with col2:
+                    opt3 = st.text_input("Option 3:")
+                    opt4 = st.text_input("Option 4:")
+
+                correct = st.selectbox(
+                    "Select Correct Option:",
+                    [1, 2, 3, 4],
+                    format_func=lambda x: f"Option {x}",
+                )
+
+                if st.button("Add Question"):
+                    options = [
+                        opt1.strip(),
+                        opt2.strip(),
+                        opt3.strip(),
+                        opt4.strip(),
+                    ]
+                    if not prompt.strip() or any(not o for o in options):
+                        st.error("Please fill in all options and the prompt.")
+                    else:
+                        q = Question(prompt, options, correct)
+                        quizzes[selected_quiz].add_question(q)
+                        save_data(quizzes)
+                        st.success("Question added successfully!")
+                        st.rerun()
